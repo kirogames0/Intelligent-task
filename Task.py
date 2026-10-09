@@ -1,17 +1,4 @@
-"""
-Warehouse Delivery Robot - Uniform Cost Search (UCS)
-
-General idea:
-  The map is turned into a dictionary {(row, col): symbol}. UCS then explores
-  the map starting from S, always expanding the cell with the LOWEST total
-  cost so far, until it pulls G out of the queue. Because it always expands
-  the cheapest cell first, the first time it reaches G is the cheapest path.
-
-How to run:   python warehouse_ucs_commented.py
-How to change the map: edit SELECTED below (e.g. "A", "B", "C", "tiny", "big"),
-  or set SELECTED = None to run every map in MAPS.
-"""
-
+from collections import deque
 import heapq  # heapq gives us a priority queue (always pops the smallest item first)
 
 # ---------------------------------------------------------------------------
@@ -42,62 +29,74 @@ def ucs(cells):
     Output: (path, total_cost, nodes_expanded)
             path is a list of (row, col) from S to G, or None if unreachable.
     """
-    # Find S and G by scanning the dictionary (no hard-coded positions).
     start = next(p for p, ch in cells.items() if ch == "S")
     goal = next(p for p, ch in cells.items() if ch == "G")
 
-    # The frontier is the priority queue of cells waiting to be expanded.
-    # Each entry is (cost so far, cell); heapq orders by the first item,
-    # so the cheapest cell always comes out first. This is what makes it UCS
-    # (BFS would use a plain queue and ignore costs).
     frontier = [(0, start)]
-
-    # Cheapest cost found so far to reach each cell (S costs 0 to "reach").
     best_cost = {start: 0}
-
-    # parent[cell] = the cell we came from on the cheapest known route.
-    # Used at the end to walk backwards from G to S and rebuild the path.
     parent = {start: None}
+    expanded = 0
 
-    expanded = 0  # counter for "nodes expanded" in the results table
-
-    while frontier:  # keep going until there is nothing left to explore
-        # Take the cheapest cell from the queue.
+    while frontier:
         g, cur = heapq.heappop(frontier)
 
-        # The same cell can be pushed several times if we later find a
-        # cheaper route to it. If this entry is more expensive than the best
-        # known cost, it is outdated, so skip it.
         if g > best_cost[cur]:
             continue
 
-        expanded += 1  # this cell is really being expanded now
+        expanded += 1
 
-        # Goal test: done when G is popped (not when first seen), because
-        # only at pop time is its cost guaranteed to be the cheapest.
         if cur == goal:
             path = []
-            while cur:                # walk back through parents until S
-                path.append(cur)      # (S's parent is None, which stops the loop)
+            while cur:
+                path.append(cur)
                 cur = parent[cur]
-            return path[::-1], g, expanded  # reverse so it reads S -> G
+            return path[::-1], g, expanded
 
-        # Generate the four neighbours: Up, Down, Left, Right.
         r, c = cur
         for nb in [(r - 1, c), (r + 1, c), (r, c - 1), (r, c + 1)]:
-            # Valid move = the cell exists on the map AND is not a wall
-            # (walls are not in COST).
             if nb in cells and cells[nb] in COST:
-                ng = g + COST[cells[nb]]  # cost so far + cost of entering nb
+                ng = g + COST[cells[nb]]
 
-                # Only record it if it is the first time we see nb, or we
-                # found a cheaper way to reach it than before.
                 if ng < best_cost.get(nb, float("inf")):
-                    best_cost[nb] = ng           # remember the cheaper cost
-                    parent[nb] = cur             # remember how we got here
-                    heapq.heappush(frontier, (ng, nb))  # queue it for expansion
+                    best_cost[nb] = ng
+                    parent[nb] = cur
+                    heapq.heappush(frontier, (ng, nb))
 
-    # Frontier is empty and G was never reached: no solution exists.
+    return None, None, expanded
+
+
+def bfs(cells):
+    
+    start = next(p for p, ch in cells.items() if ch == "S")
+    goal = next(p for p, ch in cells.items() if ch == "G")
+
+    frontier = deque([start])
+    visited = {start}
+    parent = {start: None}
+    expanded = 0
+
+    while frontier:
+        cur = frontier.popleft()
+        expanded += 1
+
+        if cur == goal:
+            path = []
+            while cur:
+                path.append(cur)
+                cur = parent[cur]
+            # Calculate total path cost based on actual terrain costs for fair comparison, 
+            # or use (len(path) - 1) if treating all steps as cost 1.
+            final_path = path[::-1]
+            path_cost = sum(COST[cells[node]] for node in final_path[1:])
+            return final_path, path_cost, expanded
+
+        r, c = cur
+        for nb in [(r - 1, c), (r + 1, c), (r, c - 1), (r, c + 1)]:
+            if nb in cells and cells[nb] in COST and nb not in visited:
+                visited.add(nb)
+                parent[nb] = cur
+                frontier.append(nb)
+
     return None, None, expanded
 
 
@@ -106,48 +105,52 @@ def ucs(cells):
 # S = start, G = goal, . = cost 1, ~ = cost 3, # = wall
 # ---------------------------------------------------------------------------
 MAP_A = ["S..#....", "##.#.##.", "....~~..", ".####.#.", "...~..#G"]
-MAP_B = ["S~~~~~%^~~G", ".#######.", ".........", ".#.#.#.#.", "........."]
+MAP_B = ["S~~~~~~~G", ".#######.", ".........", ".#.#.#.#.", "........."]
 MAP_C = ["S..#....", ".#.#.##.", "...#..#.", ".###.##.", "....#..G"]
 
-# All maps live in one dictionary, so adding a new map is a single line.
 MAPS = {"A": MAP_A, "B": MAP_B, "C": MAP_C}
-
-# Custom maps of any size/shape:
 MAPS["tiny"] = ["S.G"]
 MAPS["big"] = ["S" + "." * 40 + "~" * 5, "#" * 40 + "..", "G" + "." * 41 + "#"]
 
-# Which map to run. Use None to run all maps (useful for the results table).
-SELECTED = "B"
+# Set to None to run all maps, or specify a map name like "A"
+SELECTED =  "B"
 
 
 def load_map(path):
-    """Optional helper: read a map from a text file, one row per line,
-    so teammates can test new maps without editing the code."""
     with open(path) as f:
         return [line.rstrip("\n") for line in f if line.strip()]
 
 
 def check(grid):
-    """Validate a map before searching so mistakes fail loudly and early."""
-    text = "".join(grid)  # flatten all rows into one string to count symbols
+    text = "".join(grid)
     assert text.count("S") == 1 and text.count("G") == 1, "need exactly one S and one G"
     assert set(text) <= set("SG.~#"), "unknown symbol in map"
 
 
 def run_all():
-    """Run UCS on the selected map (or on every map if SELECTED is None)."""
+    """Run both UCS and BFS on the selected map(s) and print comparison results."""
     for name, grid in MAPS.items():
-        if SELECTED and name != SELECTED:  # skip maps we did not select
+        if SELECTED and name != SELECTED:
             continue
         check(grid)
-        # IMPORTANT: build the cells from the CURRENT grid in the loop.
-        path, cost, expanded = ucs(build_cells(grid))
-        print(f"MAP {name}: ", end="")
-        if path is None:
-            print("No path found")
+        cells = build_cells(grid)
+        
+        # Run UCS
+        ucs_path, ucs_cost, ucs_expanded = ucs(cells)
+        # Run BFS
+        bfs_path, bfs_cost, bfs_expanded = bfs(cells)
+        
+        print(f"--- MAP {name} ---")
+        if ucs_path is None:
+            print("UCS: No path found")
         else:
-            # length = number of moves = number of cells in path minus S
-            print(f"cost={cost}, length={len(path) - 1}, expanded={expanded}")
+            print(f"UCS -> cost={ucs_cost}, length={len(ucs_path) - 1}, expanded={ucs_expanded}")
+            
+        if bfs_path is None:
+            print("BFS: No path found")
+        else:
+            print(f"BFS -> cost={bfs_cost}, length={len(bfs_path) - 1}, expanded={bfs_expanded}")
+        print()
 
 
 run_all()
