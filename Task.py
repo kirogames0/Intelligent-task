@@ -1,79 +1,61 @@
-from collections import deque
-import heapq  # heapq gives us a priority queue (always pops the smallest item first)
+import time
+import heapq                      # priority queue (pops the smallest item first)
+from collections import deque     # FIFO queue for BFS
 
-# ---------------------------------------------------------------------------
-# Cost table: cost of ENTERING a cell of each symbol.
-# "#" (wall) is deliberately missing: any symbol not in this table is
-# treated as impassable, so walls need no special-case code.
-# ---------------------------------------------------------------------------
+MAP_A = ["S..#....", "##.#.##.", "....~~..", ".####.#.", "...~..#G"]
+MAP_B = ["S~~~~~~~G", ".#######.", ".........", ".#.#.#.#.", "........."]
+MAP_C = ["S..#....", ".#.#.##.", "...#..#.", ".###.##.", "....#..G"]
+
+# Set to None to run all maps, or specify a map name like "A"  <--Change map varable to run a specific map
+GRID = MAP_A
+
+MAPS = {"MAP_A": MAP_A, "MAP_B": MAP_B, "MAP_C": MAP_C}
+
 COST = {".": 1, "S": 0, "G": 1, "~": 3}
+
+
+def check(grid):
+    """Validate a map: exactly one S, exactly one G, only known symbols."""
+    text = "".join(grid)
+    assert text.count("S") == 1 and text.count("G") == 1, "need exactly one S and one G"
+    assert set(text) <= set("SG.~#"), "unknown symbol in map"
 
 
 def build_cells(grid):
     """Convert a list of strings into a dictionary {(row, col): symbol}.
 
-    Why a dictionary? The search never needs to know the map's width or
-    height: a position that is off the map is simply not a key, so we can
-    check "does this neighbour exist?" with `nb in cells`.
-    Works for any map size, even rows of different lengths.
+    A position that is off the map is simply not a key, so "does this
+    neighbour exist?" is just `nb in cells`. Works for any map size.
     """
-    return {(r, c): ch                      # key = (row, col), value = symbol
-            for r, row in enumerate(grid)   # r = row index, row = the string
-            for c, ch in enumerate(row)}    # c = column index, ch = one character
+    return {(r, c): ch
+            for r, row in enumerate(grid)
+            for c, ch in enumerate(row)}
 
 
-def ucs(cells):
-    """Uniform Cost Search.
+def heuristic(a, b):
+    """Manhattan distance between two cells.
 
-    Input : the cells dictionary from build_cells.
-    Output: (path, total_cost, nodes_expanded)
-            path is a list of (row, col) from S to G, or None if unreachable.
+    Admissible here: every move into a cell costs at least 1, so the true
+    remaining cost can never be smaller than the number of moves needed
+    when walls are ignored.
     """
-    start = next(p for p, ch in cells.items() if ch == "S")
-    goal = next(p for p, ch in cells.items() if ch == "G")
-
-    frontier = [(0, start)]
-    best_cost = {start: 0}
-    parent = {start: None}
-    expanded = 0
-
-    while frontier:
-        g, cur = heapq.heappop(frontier)
-
-        if g > best_cost[cur]:
-            continue
-
-        expanded += 1
-
-        if cur == goal:
-            path = []
-            while cur:
-                path.append(cur)
-                cur = parent[cur]
-            return path[::-1], g, expanded
-
-        r, c = cur
-        for nb in [(r - 1, c), (r + 1, c), (r, c - 1), (r, c + 1)]:
-            if nb in cells and cells[nb] in COST:
-                ng = g + COST[cells[nb]]
-
-                if ng < best_cost.get(nb, float("inf")):
-                    best_cost[nb] = ng
-                    parent[nb] = cur
-                    heapq.heappush(frontier, (ng, nb))
-
-    return None, None, expanded
+    return abs(a[0] - b[0]) + abs(a[1] - b[1])
 
 
 def bfs(cells):
-    
+    """Breadth-First Search (uninformed).
+
+    Expands cells in order of number of moves, ignoring terrain cost.
+    It finds the path with the FEWEST MOVES, which is not always the cheapest.
+    """
     start = next(p for p, ch in cells.items() if ch == "S")
     goal = next(p for p, ch in cells.items() if ch == "G")
 
-    frontier = deque([start])
-    visited = {start}
-    parent = {start: None}
+    frontier = deque([start])   
+    visited = {start}            
+    parent = {start: None}     
     expanded = 0
+    max_frontier = 1
 
     while frontier:
         cur = frontier.popleft()
@@ -84,11 +66,10 @@ def bfs(cells):
             while cur:
                 path.append(cur)
                 cur = parent[cur]
-            # Calculate total path cost based on actual terrain costs for fair comparison, 
-            # or use (len(path) - 1) if treating all steps as cost 1.
+            # Calculate total path cost based on actual terrain costs for fair comparison
             final_path = path[::-1]
             path_cost = sum(COST[cells[node]] for node in final_path[1:])
-            return final_path, path_cost, expanded
+            return final_path, path_cost, expanded, max_frontier
 
         r, c = cur
         for nb in [(r - 1, c), (r + 1, c), (r, c - 1), (r, c + 1)]:
@@ -96,61 +77,186 @@ def bfs(cells):
                 visited.add(nb)
                 parent[nb] = cur
                 frontier.append(nb)
+                max_frontier = max(max_frontier, len(frontier))
 
-    return None, None, expanded
-
-
-# ---------------------------------------------------------------------------
-# Maps (given in the assignment)
-# S = start, G = goal, . = cost 1, ~ = cost 3, # = wall
-# ---------------------------------------------------------------------------
-MAP_A = ["S..#....", "##.#.##.", "....~~..", ".####.#.", "...~..#G"]
-MAP_B = ["S~~~~~~~G", ".#######.", ".........", ".#.#.#.#.", "........."]
-MAP_C = ["S..#....", ".#.#.##.", "...#..#.", ".###.##.", "....#..G"]
-
-MAPS = {"A": MAP_A, "B": MAP_B, "C": MAP_C}
-MAPS["tiny"] = ["S.G"]
-MAPS["big"] = ["S" + "." * 40 + "~" * 5, "#" * 40 + "..", "G" + "." * 41 + "#"]
-
-# Set to None to run all maps, or specify a map name like "A"
-SELECTED =  "B"
+    return None, None, expanded, max_frontier
 
 
-def load_map(path):
-    with open(path) as f:
-        return [line.rstrip("\n") for line in f if line.strip()]
+def ucs(cells):
+    """Uniform Cost Search (uninformed).
 
+    Always expands the cell with the lowest cost-so-far g, so the first time
+    the goal is popped its path is the CHEAPEST one.
+    """
+    start = next(p for p, ch in cells.items() if ch == "S")
+    goal = next(p for p, ch in cells.items() if ch == "G")
 
-def check(grid):
-    text = "".join(grid)
-    assert text.count("S") == 1 and text.count("G") == 1, "need exactly one S and one G"
-    assert set(text) <= set("SG.~#"), "unknown symbol in map"
+    frontier = [(0, start)]     
+    best_cost = {start: 0}      
+    parent = {start: None}
+    expanded = 0
+    max_frontier = 1
 
+    while frontier:
+        g, cur = heapq.heappop(frontier)
 
-def run_all():
-    """Run both UCS and BFS on the selected map(s) and print comparison results."""
-    for name, grid in MAPS.items():
-        if SELECTED and name != SELECTED:
+        # Stale entry: a cheaper route to cur was found after this was pushed
+        if g > best_cost[cur]:
             continue
-        check(grid)
-        cells = build_cells(grid)
-        
-        # Run UCS
-        ucs_path, ucs_cost, ucs_expanded = ucs(cells)
-        # Run BFS
-        bfs_path, bfs_cost, bfs_expanded = bfs(cells)
-        
-        print(f"--- MAP {name} ---")
-        if ucs_path is None:
-            print("UCS: No path found")
-        else:
-            print(f"UCS -> cost={ucs_cost}, length={len(ucs_path) - 1}, expanded={ucs_expanded}")
-            
-        if bfs_path is None:
-            print("BFS: No path found")
-        else:
-            print(f"BFS -> cost={bfs_cost}, length={len(bfs_path) - 1}, expanded={bfs_expanded}")
-        print()
+
+        expanded += 1
+
+        if cur == goal:
+            path = []
+            while cur:
+                path.append(cur)
+                cur = parent[cur]
+            return path[::-1], g, expanded, max_frontier
+
+        r, c = cur
+        for nb in [(r - 1, c), (r + 1, c), (r, c - 1), (r, c + 1)]:
+            if nb in cells and cells[nb] in COST:
+                ng = g + COST[cells[nb]]
+                if ng < best_cost.get(nb, float("inf")):
+                    best_cost[nb] = ng
+                    parent[nb] = cur
+                    heapq.heappush(frontier, (ng, nb))
+                    max_frontier = max(max_frontier, len(frontier))
+
+    return None, None, expanded, max_frontier
 
 
-run_all()
+def a_star(cells):
+    """A* Search (informed).
+
+    Like UCS, but orders the frontier by f = g + h, where h is the Manhattan
+    distance to the goal. The heuristic never overestimates, so A* is still
+    optimal, but it expands fewer cells because it is pulled toward G.
+    """
+    start = next(p for p, ch in cells.items() if ch == "S")
+    goal = next(p for p, ch in cells.items() if ch == "G")
+
+    frontier = [(heuristic(start, goal), 0, start)]   # (f, g, cell)
+    best_cost = {start: 0}
+    parent = {start: None}
+    expanded = 0
+    max_frontier = 1
+
+    while frontier:
+        f, g, cur = heapq.heappop(frontier)
+
+        if g > best_cost[cur]:        # stale entry
+            continue
+
+        expanded += 1
+
+        if cur == goal:
+            path = []
+            while cur:
+                path.append(cur)
+                cur = parent[cur]
+            return path[::-1], g, expanded, max_frontier
+
+        r, c = cur
+        for nb in [(r - 1, c), (r + 1, c), (r, c - 1), (r, c + 1)]:
+            if nb in cells and cells[nb] in COST:
+                ng = g + COST[cells[nb]]
+                if ng < best_cost.get(nb, float("inf")):
+                    best_cost[nb] = ng
+                    parent[nb] = cur
+                    heapq.heappush(frontier, (ng + heuristic(nb, goal), ng, nb))
+                    max_frontier = max(max_frontier, len(frontier))
+
+    return None, None, expanded, max_frontier
+
+
+ALGORITHMS = {"BFS": bfs, "UCS": ucs, "A*": a_star}
+
+
+def draw_path(grid, path):
+    """Return the map as text with path cells replaced by '*' (S and G are kept)."""
+    rows = [list(row) for row in grid]
+    for r, c in path:
+        if rows[r][c] not in "SG":
+            rows[r][c] = "*"
+    return "\n".join("".join(row) for row in rows)
+
+
+def run_algorithm(name, grid):
+    """Run one algorithm on a grid and return a dict of results, including run time."""
+    cells = build_cells(grid)
+    start = time.perf_counter()
+    path, cost, expanded, max_frontier = ALGORITHMS[name](cells)
+    elapsed_ms = (time.perf_counter() - start) * 1000
+    return {"name": name, "path": path, "cost": cost, "expanded": expanded,
+            "max_frontier": max_frontier, "time_ms": elapsed_ms}
+
+
+def show_result(res, grid):
+    print(f"Algorithm : {res['name']}")
+    if res["path"] is None:
+        print("No path found")
+        print(f"Nodes expanded: {res['expanded']}")
+    else:
+        print(f"Path      : {res['path']}")
+        print(f"Length    : {len(res['path']) - 1} moves")
+        print(f"Cost      : {res['cost']}")
+        print(f"Expanded  : {res['expanded']}")
+        print(f"Max frontier: {res['max_frontier']}")
+        print(f"Time      : {res['time_ms']:.4f} ms")
+        print("Map with path:")
+        print(draw_path(grid, res["path"]))
+    print("-" * 60)
+
+
+check(GRID)
+print("=== Running on the selected GRID ===")
+print("\n".join(GRID))
+print("=" * 60)
+for algo_name in ALGORITHMS:
+    show_result(run_algorithm(algo_name, GRID), GRID)
+
+print() 
+print("\/" * 80) 
+print()   
+
+rows = []
+for map_name, grid in MAPS.items():
+    check(grid)
+    for algo_name in ALGORITHMS:
+        res = run_algorithm(algo_name, grid)
+        found = res["path"] is not None
+        rows.append({
+            "Map": map_name,
+            "Algorithm": algo_name,
+            "Path length": len(res["path"]) - 1 if found else "-",
+            "Path cost": res["cost"] if found else "-",
+            "Nodes expanded": res["expanded"],
+            "Max frontier": res["max_frontier"],
+            "Time (ms)": f"{res['time_ms']:.4f}",
+            "Result": "found" if found else "No path found",
+        })
+
+print("\n=== Results table: MAP_A, MAP_B, MAP_C ===")
+headers = list(rows[0].keys())
+widths = [max(len(h), *(len(str(r[h])) for r in rows)) for h in headers]
+line = "+-" + "-+-".join("-" * w for w in widths) + "-+"
+print(line)
+print("| " + " | ".join(h.ljust(w) for h, w in zip(headers, widths)) + " |")
+print(line)
+for i, r in enumerate(rows):
+    print("| " + " | ".join(str(r[h]).ljust(w) for h, w in zip(headers, widths)) + " |")
+    if i % len(ALGORITHMS) == len(ALGORITHMS) - 1:
+        print(line)    
+
+print() 
+print("\/" * 80)  
+print() 
+
+print("\n=== Paths on every map ===")
+for map_name, grid in MAPS.items():
+    print("#" * 60)
+    print(f"# {map_name}")
+    print("#" * 60)
+    for algo_name in ALGORITHMS:
+        show_result(run_algorithm(algo_name, grid), grid)
